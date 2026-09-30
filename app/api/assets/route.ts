@@ -10,6 +10,8 @@ import { assetCreateSchema } from "@/lib/validations/asset"
 import { generateAssetQrCode } from "@/lib/qrcode"
 import { escapeRegex } from "@/lib/utils"
 import { writeAuditLog } from "@/lib/audit"
+import { assertCanAddAssets } from "@/lib/plan-limits"
+import { PRODUCT_TYPES, PRODUCT_TYPE_KEYS, sanitizeSpecs } from "@/lib/constants/product-types"
 
 export async function GET(req: Request) {
   const { session, response } = await requireSession()
@@ -52,6 +54,10 @@ export async function GET(req: Request) {
 
     if (status) filter.status = status
     if (category) filter.category = category
+    const productType = url.searchParams.get("productType")
+    if (productType && (PRODUCT_TYPE_KEYS as string[]).includes(productType)) {
+      filter.productType = productType
+    }
     if (branchId) filter.branchId = branchId
     if (search) {
       const safeSearch = escapeRegex(search).slice(0, 100)
@@ -91,7 +97,17 @@ export async function POST(req: Request) {
     if (!parsed.success) {
       return NextResponse.json({ error: parsed.error.issues[0]?.message }, { status: 400 })
     }
-    const { purchaseDate, purchaseCost, warrantyExpiry, amcExpiry, targetCompanyId, ...rest } = parsed.data
+    const {
+      purchaseDate,
+      purchaseCost,
+      warrantyExpiry,
+      amcExpiry,
+      targetCompanyId,
+      productType,
+      category,
+      specs,
+      ...rest
+    } = parsed.data
     const cost = purchaseCost ? Number(purchaseCost) : 0
 
     await connectDB()
@@ -106,6 +122,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Branch not found for the selected company." }, { status: 400 })
     }
 
+    await assertCanAddAssets(companyId)
+
     const seq = await nextSequence(companyId, "asset")
     const assetId = formatSequence("AST", seq)
 
@@ -113,6 +131,9 @@ export async function POST(req: Request) {
       ...rest,
       assetId,
       companyId,
+      productType,
+      category: category?.trim() || PRODUCT_TYPES[productType].label,
+      specs: sanitizeSpecs(productType, specs),
       purchaseDate: purchaseDate || null,
       purchaseCost: cost,
       currentValue: cost,

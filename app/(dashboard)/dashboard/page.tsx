@@ -1,10 +1,11 @@
 import { Boxes, CheckCircle2, Wrench, Ticket as TicketIcon, Building2, Users } from "lucide-react"
 import { auth } from "@/auth"
-import { getOrgDashboardStats, getEmployeeDashboardStats } from "@/lib/dashboard"
+import { getOrgDashboardStats, getEmployeeDashboardStats, getValuationStats } from "@/lib/dashboard"
 import { getStorageStatus } from "@/lib/storage"
 import { StatCard } from "@/components/dashboard/stat-card"
 import { OnboardingChecklist } from "@/components/dashboard/onboarding-checklist"
 import { StorageCard } from "@/components/dashboard/storage-card"
+import { ValuationSection } from "@/components/dashboard/valuation-section"
 
 export default async function DashboardPage() {
   const session = await auth()
@@ -32,9 +33,10 @@ export default async function DashboardPage() {
     )
   }
 
-  const [stats, storage] = await Promise.all([
+  const [stats, storage, valuation] = await Promise.all([
     getOrgDashboardStats(session),
     getStorageStatus(session.user.companyId!),
+    getValuationStats(session),
   ])
 
   return (
@@ -86,6 +88,8 @@ export default async function DashboardPage() {
         <StatCard label="Branches" value={stats.branchCount} href="/branches" icon={Building2} tone="info" />
         <StatCard label="Employees" value={stats.employeeCount} href="/employees" icon={Users} tone="info" />
       </div>
+
+      <ValuationSection stats={valuation} />
     </div>
   )
 }

@@ -14,6 +14,10 @@ const AssetAssignmentHistorySchema = new Schema(
     condition: { type: String, default: null },
     notes: { type: String, default: null },
     assignedBy: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    // Condition inspections (photos + damage checklist) recorded at
+    // hand-over and at return — see models/AssetInspection.ts.
+    checkOutInspectionId: { type: Schema.Types.ObjectId, ref: "AssetInspection", default: null },
+    checkInInspectionId: { type: Schema.Types.ObjectId, ref: "AssetInspection", default: null },
   },
   { timestamps: true }
 )

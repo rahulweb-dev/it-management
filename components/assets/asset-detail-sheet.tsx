@@ -1,10 +1,16 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
+import { useSession } from "next-auth/react"
 import { format, formatDistanceToNow } from "date-fns"
-import { QrCode, UserPlus, UserMinus, Trash2, Wifi, WifiOff, ImagePlus, X } from "lucide-react"
+import { QrCode, UserPlus, Undo2, Trash2, Wifi, WifiOff, ImagePlus, X } from "lucide-react"
 import { toast } from "sonner"
 import { deviceStatus } from "@/lib/agent/status"
+import { PRODUCT_TYPES, resolveProductType, type SpecField } from "@/lib/constants/product-types"
+import { ReturnAssetDialog } from "@/components/assets/return-asset-dialog"
+import { InspectionSummary } from "@/components/assets/inspection-summary"
+import type { InspectionRecord } from "@/components/assets/inspection-form"
+import { valueAsset, formatInr } from "@/lib/depreciation"
 import { Badge } from "@/components/ui/badge"
 import {
   Sheet,
@@ -33,6 +39,8 @@ type AssetDetail = {
   assetId: string
   assetName: string
   category: string
+  productType?: string | null
+  specs?: Record<string, string>
   brand: string | null
   model: string | null
   serialNumber: string | null
@@ -42,6 +50,8 @@ type AssetDetail = {
   qrCodeUrl: string | null
   purchaseDate: string | null
   purchaseCost: number
+  depreciationRate?: number
+  createdAt?: string
   vendor: string | null
   warrantyExpiry: string | null
   amcExpiry: string | null
@@ -68,9 +78,11 @@ type HistoryEntry = {
   _id: string
   assignedDate: string
   returnedDate: string | null
-  toUserId: { name: string; email: string } | null
+  toUserId: { _id: string; name: string; email: string } | null
   assignedBy: { name: string } | null
   notes: string | null
+  checkOutInspectionId: InspectionRecord | null
+  checkInInspectionId: InspectionRecord | null
 }
 
 function fmt(date: string | null) {
@@ -90,9 +102,11 @@ export function AssetDetailSheet({
   isItPerson: boolean
   onChanged: () => void
 }) {
+  const { data: session } = useSession()
   const [asset, setAsset] = useState<AssetDetail | null>(null)
   const [history, setHistory] = useState<HistoryEntry[]>([])
   const [assignOpen, setAssignOpen] = useState(false)
+  const [returnOpen, setReturnOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [uploading, setUploading] = useState(false)
 
@@ -110,20 +124,19 @@ export function AssetDetailSheet({
     if (open) load()
   }, [open, load])
 
-  async function unassign() {
-    if (!assetId) return
-    const res = await fetch(`/api/assets/${assetId}/unassign`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: "{}",
-    })
+  const productType = resolveProductType(asset ?? {})
+  const typeDef = PRODUCT_TYPES[productType]
+  const currentAssignment = history.find((h) => !h.returnedDate) ?? null
+  const filledSpecs = (typeDef.specs as SpecField[]).filter((f) => asset?.specs?.[f.key])
+
+  async function acknowledge(inspectionId: string) {
+    const res = await fetch(`/api/inspections/${inspectionId}/acknowledge`, { method: "POST" })
     if (!res.ok) {
-      toast.error("Failed to unassign asset")
+      toast.error("Couldn't record your confirmation")
       return
     }
-    toast.success("Asset unassigned")
+    toast.success("Thanks — receipt confirmed")
     load()
-    onChanged()
   }
 
   async function uploadPhoto(file: File) {
@@ -183,7 +196,7 @@ export function AssetDetailSheet({
   return (
     <>
       <Sheet open={open} onOpenChange={onOpenChange}>
-        <SheetContent className="w-full overflow-y-auto sm:max-w-md">
+        <SheetContent className="w-full overflow-y-auto sm:max-w-lg">
           {!asset ? (
             <div className="p-6 text-sm text-muted-foreground">Loading…</div>
           ) : (
@@ -211,7 +224,10 @@ export function AssetDetailSheet({
                   </div>
                   <div className="space-y-1">
                     <StatusBadge status={asset.status} />
-                    <p className="text-sm text-muted-foreground">{asset.category}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {typeDef.label}
+                      {asset.category && asset.category !== typeDef.label && ` · ${asset.category}`}
+                    </p>
                     {typeof asset.companyId === "object" && (
                       <p className="text-xs text-muted-foreground">{asset.companyId.name}</p>
                     )}
@@ -270,9 +286,9 @@ export function AssetDetailSheet({
                 {isItPerson && (
                   <div className="flex gap-2">
                     {asset.assignedTo ? (
-                      <Button variant="outline" size="sm" onClick={unassign}>
-                        <UserMinus className="h-4 w-4" />
-                        Unassign
+                      <Button variant="outline" size="sm" onClick={() => setReturnOpen(true)}>
+                        <Undo2 className="h-4 w-4" />
+                        Return
                       </Button>
                     ) : (
                       <Button size="sm" onClick={() => setAssignOpen(true)}>
@@ -311,12 +327,52 @@ export function AssetDetailSheet({
                   <dt className="text-muted-foreground">Purchase date</dt>
                   <dd>{fmt(asset.purchaseDate)}</dd>
                   <dt className="text-muted-foreground">Purchase cost</dt>
-                  <dd>{asset.purchaseCost ? `₹${asset.purchaseCost.toLocaleString()}` : "—"}</dd>
+                  <dd>{asset.purchaseCost ? formatInr(asset.purchaseCost) : "—"}</dd>
+                  {asset.purchaseCost > 0 &&
+                    (() => {
+                      const v = valueAsset(asset)
+                      return (
+                        <>
+                          <dt className="text-muted-foreground">Book value</dt>
+                          <dd>
+                            {formatInr(v.bookValue)}
+                            <span className="block text-xs text-muted-foreground">
+                              {v.method === "written_off"
+                                ? "Written off"
+                                : v.method === "written_down"
+                                  ? `${asset.depreciationRate}%/yr written-down`
+                                  : `${v.ageYears.toFixed(1)} of ${v.usefulLifeYears} yr life`}
+                              {v.fullyDepreciated && v.method !== "written_off" && " · due for replacement"}
+                            </span>
+                          </dd>
+                        </>
+                      )
+                    })()}
                   <dt className="text-muted-foreground">Warranty expiry</dt>
                   <dd>{fmt(asset.warrantyExpiry)}</dd>
                   <dt className="text-muted-foreground">AMC expiry</dt>
                   <dd>{fmt(asset.amcExpiry)}</dd>
                 </dl>
+
+                {filledSpecs.length > 0 && (
+                  <>
+                    <Separator />
+                    <div>
+                      <h3 className="mb-3 text-sm font-medium">{typeDef.label} specifications</h3>
+                      <dl className="grid grid-cols-2 gap-y-3 text-sm">
+                        {filledSpecs.map((f) => (
+                          <div key={f.key} className="contents">
+                            <dt className="text-muted-foreground">{f.label}</dt>
+                            <dd className="truncate">
+                              {asset.specs![f.key]}
+                              {f.unit ? ` ${f.unit}` : ""}
+                            </dd>
+                          </div>
+                        ))}
+                      </dl>
+                    </div>
+                  </>
+                )}
 
                 {asset.agent?.enrolled && (
                   <>
@@ -394,6 +450,14 @@ export function AssetDetailSheet({
                             <p className="text-xs text-muted-foreground">by {h.assignedBy.name}</p>
                           )}
                           {h.notes && <p className="mt-1 text-xs">{h.notes}</p>}
+                          <InspectionSummary
+                            checkOut={h.checkOutInspectionId}
+                            checkIn={h.checkInInspectionId}
+                            canAcknowledge={
+                              !h.returnedDate && !!session && h.toUserId?._id === session.user.id
+                            }
+                            onAcknowledge={() => h.checkOutInspectionId && acknowledge(h.checkOutInspectionId._id)}
+                          />
                         </li>
                       ))}
                     </ol>
@@ -410,7 +474,21 @@ export function AssetDetailSheet({
         onOpenChange={setAssignOpen}
         assetId={assetId}
         companyId={typeof asset?.companyId === "object" ? asset.companyId._id : asset?.companyId}
+        productType={productType}
         onAssigned={() => {
+          load()
+          onChanged()
+        }}
+      />
+
+      <ReturnAssetDialog
+        open={returnOpen}
+        onOpenChange={setReturnOpen}
+        assetId={assetId}
+        employeeName={asset?.assignedTo?.name ?? "employee"}
+        productType={productType}
+        checkOut={currentAssignment?.checkOutInspectionId ?? null}
+        onReturned={() => {
           load()
           onChanged()
         }}

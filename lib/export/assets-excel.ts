@@ -1,4 +1,6 @@
 import ExcelJS from "exceljs"
+import { valueAsset } from "@/lib/depreciation"
+import { PRODUCT_TYPES, resolveProductType } from "@/lib/constants/product-types"
 
 export async function buildAssetsWorkbook(assets: any[]) {
   const workbook = new ExcelJS.Workbook()
@@ -10,6 +12,7 @@ export async function buildAssetsWorkbook(assets: any[]) {
   sheet.columns = [
     { header: "Asset ID", key: "assetId", width: 12 },
     { header: "Name", key: "assetName", width: 28 },
+    { header: "Type", key: "productType", width: 14 },
     { header: "Category", key: "category", width: 14 },
     { header: "Brand", key: "brand", width: 14 },
     { header: "Model", key: "model", width: 18 },
@@ -22,6 +25,8 @@ export async function buildAssetsWorkbook(assets: any[]) {
     { header: "Vendor", key: "vendor", width: 18 },
     { header: "Purchase Date", key: "purchaseDate", width: 14 },
     { header: "Purchase Cost", key: "purchaseCost", width: 14 },
+    { header: "Book Value", key: "bookValue", width: 14 },
+    { header: "Accumulated Depreciation", key: "accumulated", width: 16 },
     { header: "Warranty Expiry", key: "warrantyExpiry", width: 16 },
     { header: "AMC Expiry", key: "amcExpiry", width: 14 },
     { header: "Agent Enrolled", key: "agentEnrolled", width: 14 },
@@ -38,7 +43,11 @@ export async function buildAssetsWorkbook(assets: any[]) {
   sheet.getRow(1).font = { bold: true }
 
   for (const a of assets) {
+    const v = valueAsset(a)
     sheet.addRow({
+      productType: PRODUCT_TYPES[resolveProductType(a)].label,
+      bookValue: v.bookValue,
+      accumulated: v.accumulated,
       assetId: a.assetId,
       assetName: a.assetName,
       category: a.category,

@@ -28,6 +28,8 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
       .populate("toUserId", "name email")
       .populate("fromUserId", "name email")
       .populate("assignedBy", "name email")
+      .populate({ path: "checkOutInspectionId", populate: { path: "performedBy", select: "name" } })
+      .populate({ path: "checkInInspectionId", populate: { path: "performedBy", select: "name" } })
       .sort({ assignedDate: -1 })
 
     return NextResponse.json({ items })

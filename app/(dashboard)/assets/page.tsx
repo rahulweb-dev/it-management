@@ -27,6 +27,7 @@ import {
 import { StatusBadge } from "@/components/status-badge"
 import { EmptyState } from "@/components/empty-state"
 import { ASSET_STATUSES } from "@/lib/constants/enums"
+import { PRODUCT_TYPES, PRODUCT_TYPE_KEYS, resolveProductType } from "@/lib/constants/product-types"
 import { deviceStatus } from "@/lib/agent/status"
 import { cn } from "@/lib/utils"
 import { AssetFormDialog } from "@/components/assets/asset-form-dialog"
@@ -37,6 +38,7 @@ type AssetRow = {
   assetId: string
   assetName: string
   category: string
+  productType?: string | null
   status: string
   branchId: { _id: string; name: string } | null
   assignedTo: { _id: string; name: string; email: string } | null
@@ -58,6 +60,7 @@ export default function AssetsPage() {
   const [orgCompanies, setOrgCompanies] = useState<Company[]>([])
   const [status, setStatus] = useState(searchParams.get("status") ?? "all")
   const [branchId, setBranchId] = useState("all")
+  const [productType, setProductType] = useState("all")
   const [search, setSearch] = useState("")
   const [showArchived, setShowArchived] = useState(false)
   const [allCompanies, setAllCompanies] = useState(false)
@@ -71,6 +74,7 @@ export default function AssetsPage() {
     } else {
       if (status !== "all") params.set("status", status)
       if (branchId !== "all") params.set("branchId", branchId)
+      if (productType !== "all") params.set("productType", productType)
       if (search) params.set("search", search)
       if (allCompanies) params.set("scope", "organization")
     }
@@ -79,7 +83,7 @@ export default function AssetsPage() {
       const data = await res.json()
       setAssets(data.items)
     }
-  }, [status, branchId, search, showArchived, allCompanies])
+  }, [status, branchId, productType, search, showArchived, allCompanies])
 
   function exportHref() {
     const params = new URLSearchParams()
@@ -204,6 +208,19 @@ export default function AssetsPage() {
               ))}
             </SelectContent>
           </Select>
+          <Select value={productType} onValueChange={setProductType}>
+            <SelectTrigger className="w-40">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All types</SelectItem>
+              {PRODUCT_TYPE_KEYS.map((t) => (
+                <SelectItem key={t} value={t}>
+                  {PRODUCT_TYPES[t].label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           {isItPerson && branches.length > 0 && (
             <Select value={branchId} onValueChange={setBranchId}>
               <SelectTrigger className="w-44">
@@ -249,7 +266,7 @@ export default function AssetsPage() {
               <TableRow>
                 <TableHead>Asset</TableHead>
                 {allCompanies && <TableHead>Company</TableHead>}
-                <TableHead>Category</TableHead>
+                <TableHead>Type</TableHead>
                 <TableHead>Branch</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Assigned to</TableHead>
@@ -291,7 +308,12 @@ export default function AssetsPage() {
                       {typeof asset.companyId === "object" && asset.companyId ? asset.companyId.name : "—"}
                     </TableCell>
                   )}
-                  <TableCell>{asset.category}</TableCell>
+                  <TableCell>
+                    <p>{PRODUCT_TYPES[resolveProductType(asset)].label}</p>
+                    {asset.category !== PRODUCT_TYPES[resolveProductType(asset)].label && (
+                      <p className="text-xs text-muted-foreground">{asset.category}</p>
+                    )}
+                  </TableCell>
                   <TableCell>{asset.branchId?.name ?? "—"}</TableCell>
                   <TableCell>
                     <StatusBadge status={asset.status} />

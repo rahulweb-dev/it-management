@@ -1,6 +1,17 @@
 import { NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { RbacError } from "@/lib/rbac"
+import { StorageLimitError } from "@/lib/storage"
+
+/** A deliberate, user-facing 4xx/5xx — its message is safe to show the client. */
+export class HttpError extends Error {
+  constructor(
+    message: string,
+    public status = 400
+  ) {
+    super(message)
+  }
+}
 
 /** Resolves the session for an API route, or returns a 401 response. */
 export async function requireSession() {
@@ -19,7 +30,7 @@ export async function requireSession() {
  * and the real message in dev for fast debugging.
  */
 export function handleApiError(err: unknown) {
-  if (err instanceof RbacError) {
+  if (err instanceof RbacError || err instanceof HttpError || err instanceof StorageLimitError) {
     return NextResponse.json({ error: err.message }, { status: err.status })
   }
 

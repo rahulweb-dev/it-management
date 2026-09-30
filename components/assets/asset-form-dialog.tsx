@@ -7,6 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod"
 import { toast } from "sonner"
 import { assetCreateSchema, type AssetCreateInput } from "@/lib/validations/asset"
 import { ASSET_CONDITIONS } from "@/lib/constants/enums"
+import { PRODUCT_TYPES, PRODUCT_TYPE_KEYS, type SpecField } from "@/lib/constants/product-types"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
@@ -37,8 +38,11 @@ import {
 type Branch = { _id: string; name: string }
 type Company = { _id: string; name: string }
 
+const STEPS = ["Basic details", "Specifications", "Purchase & warranty"]
+
 const STEP_1_FIELDS = [
   "assetName",
+  "productType",
   "category",
   "brand",
   "model",
@@ -67,7 +71,9 @@ export function AssetFormDialog({
     resolver: zodResolver(assetCreateSchema),
     defaultValues: {
       assetName: "",
+      productType: undefined,
       category: "",
+      specs: {},
       brand: "",
       model: "",
       serialNumber: "",
@@ -84,6 +90,8 @@ export function AssetFormDialog({
   })
 
   const targetCompanyId = form.watch("targetCompanyId")
+  const productType = form.watch("productType")
+  const specFields: SpecField[] = productType ? PRODUCT_TYPES[productType].specs : []
 
   useEffect(() => {
     if (open) {
@@ -111,7 +119,7 @@ export function AssetFormDialog({
 
   async function goNext() {
     const valid = await form.trigger(STEP_1_FIELDS as unknown as (keyof AssetCreateInput)[])
-    if (valid) setStep(2)
+    if (valid) setStep(specFields.length > 0 ? 2 : 3)
   }
 
   async function onSubmit(values: AssetCreateInput) {
@@ -137,24 +145,56 @@ export function AssetFormDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Add asset</DialogTitle>
-          <DialogDescription>Step {step} of 2 — {step === 1 ? "Basic details" : "Purchase & warranty"}</DialogDescription>
+          <DialogDescription>
+            Step {step} of 3 — {STEPS[step - 1]}
+          </DialogDescription>
         </DialogHeader>
-        <Progress value={step === 1 ? 50 : 100} className="h-1" />
+        <Progress value={(step / 3) * 100} className="h-1" />
 
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
             {step === 1 && (
               <>
+                <FormField
+                  control={form.control}
+                  name="assetName"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Asset name</FormLabel>
+                      <FormControl>
+                        <Input placeholder="Dell Latitude 5420" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
                 <div className="grid grid-cols-2 gap-4">
                   <FormField
                     control={form.control}
-                    name="assetName"
+                    name="productType"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Asset name</FormLabel>
-                        <FormControl>
-                          <Input placeholder="Dell Latitude 5420" {...field} />
-                        </FormControl>
+                        <FormLabel>Product type</FormLabel>
+                        <Select
+                          onValueChange={(v) => {
+                            field.onChange(v)
+                            form.setValue("specs", {})
+                          }}
+                          value={field.value ?? ""}
+                        >
+                          <FormControl>
+                            <SelectTrigger className="w-full">
+                              <SelectValue placeholder="Select type" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {PRODUCT_TYPE_KEYS.map((t) => (
+                              <SelectItem key={t} value={t}>
+                                {PRODUCT_TYPES[t].label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -164,23 +204,21 @@ export function AssetFormDialog({
                     name="category"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Category</FormLabel>
+                        <FormLabel>Sub-category (optional)</FormLabel>
                         <FormControl>
-                          <Input placeholder="Laptop" list="asset-categories" {...field} />
+                          <Input placeholder={productType === "laptop" ? "Ultrabook" : "e.g. Label printer"} {...field} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
                     )}
                   />
                 </div>
-                <datalist id="asset-categories">
-                  <option value="Laptop" />
-                  <option value="Monitor" />
-                  <option value="Printer" />
-                  <option value="Mobile" />
-                  <option value="Networking" />
-                  <option value="Accessory" />
-                </datalist>
+                {productType && (
+                  <p className="-mt-2 text-xs text-muted-foreground">
+                    Hand-over requires {PRODUCT_TYPES[productType].requiredPhotos.length} photos and a{" "}
+                    {PRODUCT_TYPES[productType].checklist.length}-point damage check.
+                  </p>
+                )}
                 <div className="grid grid-cols-2 gap-4">
                   <FormField
                     control={form.control}
@@ -326,6 +364,46 @@ export function AssetFormDialog({
             {step === 2 && (
               <>
                 <div className="grid grid-cols-2 gap-4">
+                  {specFields.map((spec) => (
+                    <FormField
+                      key={spec.key}
+                      control={form.control}
+                      name={`specs.${spec.key}`}
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>
+                            {spec.label}
+                            {spec.unit && <span className="text-muted-foreground"> ({spec.unit})</span>}
+                          </FormLabel>
+                          <FormControl>
+                            <Input
+                              type={spec.type === "number" ? "number" : "text"}
+                              min={spec.type === "number" ? 0 : undefined}
+                              placeholder={spec.placeholder}
+                              {...field}
+                              value={field.value ?? ""}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                  ))}
+                </div>
+                <DialogFooter className="justify-between sm:justify-between">
+                  <Button type="button" variant="outline" onClick={() => setStep(1)}>
+                    Back
+                  </Button>
+                  <Button type="button" onClick={() => setStep(3)}>
+                    Next
+                  </Button>
+                </DialogFooter>
+              </>
+            )}
+
+            {step === 3 && (
+              <>
+                <div className="grid grid-cols-2 gap-4">
                   <FormField
                     control={form.control}
                     name="purchaseDate"
@@ -401,7 +479,7 @@ export function AssetFormDialog({
                   />
                 </div>
                 <DialogFooter className="justify-between sm:justify-between">
-                  <Button type="button" variant="outline" onClick={() => setStep(1)}>
+                  <Button type="button" variant="outline" onClick={() => setStep(specFields.length > 0 ? 2 : 1)}>
                     Back
                   </Button>
                   <Button type="submit" disabled={form.formState.isSubmitting}>

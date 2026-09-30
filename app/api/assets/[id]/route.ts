@@ -6,6 +6,8 @@ import { getScopedFilter, assertCompanyRole } from "@/lib/rbac"
 import { getAccessibleCompanyIds } from "@/lib/organization"
 import { assetUpdateSchema } from "@/lib/validations/asset"
 import { writeAuditLog } from "@/lib/audit"
+import { assertBranchInCompany } from "@/lib/tenant-refs"
+import { resolveProductType, sanitizeSpecs } from "@/lib/constants/product-types"
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { session, response } = await requireSession()
@@ -46,14 +48,31 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     if (!parsed.success) {
       return NextResponse.json({ error: parsed.error.issues[0]?.message }, { status: 400 })
     }
-    const { purchaseDate, warrantyExpiry, amcExpiry, ...rest } = parsed.data
+    const { purchaseDate, warrantyExpiry, amcExpiry, specs, category, ...rest } = parsed.data
 
     await connectDB()
     const companyIds = await getAccessibleCompanyIds(session)
+
+    // Specs are only meaningful relative to a product type, so resolve the
+    // effective type (new one if changing, else the stored/inferred one).
+    let specsUpdate: Record<string, string> | undefined
+    if (specs !== undefined || rest.branchId) {
+      const existing = await Asset.findOne({ _id: id, companyId: { $in: companyIds } })
+      if (!existing) return NextResponse.json({ error: "Asset not found" }, { status: 404 })
+      // The branch must belong to the asset's own company, not merely one
+      // the caller can see across their organization.
+      await assertBranchInCompany(existing.companyId.toString(), rest.branchId)
+      if (specs !== undefined) {
+        specsUpdate = sanitizeSpecs(rest.productType ?? resolveProductType(existing), specs)
+      }
+    }
+
     const asset = await Asset.findOneAndUpdate(
       { _id: id, companyId: { $in: companyIds } },
       {
         ...rest,
+        ...(category?.trim() && { category: category.trim() }),
+        ...(specsUpdate && { specs: specsUpdate }),
         ...(purchaseDate !== undefined && { purchaseDate: purchaseDate || null }),
         // A changed expiry date invalidates any reminder already sent for
         // the old date — clear it so the cron can notify again if the new

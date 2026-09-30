@@ -1,6 +1,7 @@
 import mongoose, { Schema } from "mongoose"
 import { tenantScoped } from "@/lib/mongoose/tenantPlugin"
 import { ASSET_STATUSES, ASSET_CONDITIONS } from "@/lib/constants/enums"
+import { PRODUCT_TYPE_KEYS } from "@/lib/constants/product-types"
 
 // Auto-collected by the installed agent (PowerShell on Windows, shell
 // script on Mac) — see lib/agent/*. Only present once an employee has
@@ -31,6 +32,13 @@ const AssetSchema = new Schema(
     assetId: { type: String, required: true },
     assetName: { type: String, required: true, trim: true },
     category: { type: String, required: true, trim: true },
+    // Drives required hand-over photos, the damage checklist and spec
+    // fields (lib/constants/product-types.ts). Null on assets created
+    // before types existed — resolveProductType() infers from category.
+    productType: { type: String, enum: PRODUCT_TYPE_KEYS, default: null },
+    // Type-specific specs (RAM, IMEI, screen size...) keyed by the
+    // SpecField.key values in lib/constants/product-types.ts.
+    specs: { type: Map, of: String, default: {} },
     serialNumber: { type: String, default: null, trim: true },
     brand: { type: String, default: null },
     model: { type: String, default: null },
@@ -61,6 +69,7 @@ const AssetSchema = new Schema(
 
 AssetSchema.index({ companyId: 1, assetId: 1 }, { unique: true })
 AssetSchema.index({ companyId: 1, status: 1 })
+AssetSchema.index({ companyId: 1, productType: 1 })
 AssetSchema.index({ companyId: 1, branchId: 1 })
 AssetSchema.index({ companyId: 1, assignedTo: 1 })
 AssetSchema.index({ companyId: 1, warrantyExpiry: 1 })
