@@ -64,3 +64,33 @@ export function isImageKitConfigured() {
       process.env.IMAGEKIT_URL_ENDPOINT
   )
 }
+
+/**
+ * Deletes an uploaded file given the URL we stored for it, and gives the
+ * bytes back to the company's storage quota. Only files under one of
+ * `allowedFolders` (always a company-scoped folder) can be deleted, so a
+ * URL can never reach another tenant's files. Returns the bytes freed, or
+ * 0 if the file was already gone.
+ */
+export async function deleteFileByUrl(opts: { url: string; companyId: string; allowedFolders: string[] }) {
+  const ik = getImageKitClient()
+  const endpoint = process.env.IMAGEKIT_URL_ENDPOINT?.replace(/\/+$/, "")
+  if (!ik || !endpoint || !opts.url.startsWith(endpoint + "/")) return 0
+
+  const filePath = decodeURIComponent(new URL(opts.url).pathname.slice(new URL(endpoint).pathname.replace(/\/+$/, "").length))
+  if (filePath.includes("..") || !opts.allowedFolders.some((f) => filePath.startsWith(f.replace(/\/?$/, "/")))) return 0
+
+  const slash = filePath.lastIndexOf("/")
+  const folder = filePath.slice(0, slash + 1)
+  const name = filePath.slice(slash + 1)
+  const matches = await ik.assets.list({ path: folder, searchQuery: `name = "${name.replace(/"/g, '\\"')}"`, limit: 5 })
+  const file = matches.find((f) => "fileId" in f && (f as { filePath?: string }).filePath === filePath) as
+    | { fileId?: string; size?: number }
+    | undefined
+  if (!file?.fileId) return 0
+
+  await ik.files.delete(file.fileId)
+  const size = file.size ?? 0
+  if (size > 0) await recordStorageUsage(opts.companyId, -size)
+  return size
+}

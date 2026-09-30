@@ -10,6 +10,8 @@ const UserSchema = new Schema(
     name: { type: String, required: true, trim: true },
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
     passwordHash: { type: String, required: true },
+    // Sessions issued before this are rejected on their next re-check (auth.ts).
+    passwordChangedAt: { type: Date, default: null },
     phone: { type: String, default: null },
     role: { type: String, enum: COMPANY_ROLES, required: true, default: "employee" },
     branchId: { type: Schema.Types.ObjectId, ref: "Branch", default: null },

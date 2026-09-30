@@ -9,13 +9,17 @@ import type { Role } from "@/lib/constants/enums"
  * it's broken here twice across two different installs. Casting to this
  * local shape instead means our typing doesn't depend on that path at all.
  */
-type AppJWT = {
+export type AppJWT = {
   id: string
   companyId: string | null
   branchId: string | null
   organizationId: string | null
   role: Role
   avatar: string | null
+  /** ms epoch — set at sign-in, compared against passwordChangedAt. */
+  loginAt?: number
+  /** ms epoch — last time auth.ts re-validated this token against the DB. */
+  checkedAt?: number
 }
 
 /**
@@ -26,7 +30,9 @@ type AppJWT = {
  */
 export const authConfig = {
   pages: { signIn: "/login" },
-  session: { strategy: "jwt" },
+  // 7 days, down from the 30-day default — and auth.ts re-validates the
+  // account against the database at least once a minute regardless.
+  session: { strategy: "jwt", maxAge: 7 * 24 * 60 * 60 },
   providers: [],
   callbacks: {
     async jwt({ token, user }) {
@@ -38,6 +44,8 @@ export const authConfig = {
         t.organizationId = (user as any).organizationId ?? null
         t.role = (user as any).role
         t.avatar = (user as any).avatar
+        t.loginAt = Date.now()
+        t.checkedAt = Date.now()
       }
       return token
     },

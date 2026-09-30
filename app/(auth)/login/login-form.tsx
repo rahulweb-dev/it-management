@@ -45,7 +45,11 @@ export function LoginForm() {
     setLoading(false)
 
     if (result?.error) {
-      toast.error("Invalid email or password")
+      toast.error(
+        result.code === "inactive_company"
+          ? "Your company's AssetFlow subscription is inactive. Contact your administrator."
+          : "Invalid email or password"
+      )
       return
     }
 

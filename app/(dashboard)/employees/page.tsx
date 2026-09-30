@@ -48,7 +48,7 @@ export default function EmployeesPage() {
   const [employees, setEmployees] = useState<Employee[] | null>(null)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [inviteOpen, setInviteOpen] = useState(false)
-  const [linkDialog, setLinkDialog] = useState<{ title: string; description: string; link: string } | null>(
+  const [linkDialog, setLinkDialog] = useState<{ title: string; description: string; link: string; revocable?: boolean } | null>(
     null
   )
 
@@ -92,9 +92,20 @@ export default function EmployeesPage() {
     setLinkDialog({
       title: "Company onboarding link",
       description:
-        "Share this with everyone — Slack, email blast, notice board. Anyone who opens it fills in their own Employee ID, name, password, and branch, then gets walked straight into registering their computer. Works for 90 days, reusable by any number of people.",
+        "Share this with everyone — Slack, email blast, notice board. Anyone who opens it fills in their own Employee ID, name, password, and branch, then gets walked straight into registering their computer. Works for 90 days, reusable by any number of people. Any link generated earlier has now stopped working.",
       link: data.link,
+      revocable: true,
     })
+  }
+
+  async function revokeOnboardingLink() {
+    const res = await fetch("/api/employees/onboarding-link", { method: "DELETE" })
+    if (!res.ok) {
+      toast.error("Failed to disable the link")
+      return
+    }
+    toast.success("Onboarding link disabled — nobody new can sign up with it")
+    setLinkDialog(null)
   }
 
   async function sendInstallLink(employee: Employee) {
@@ -124,7 +135,7 @@ export default function EmployeesPage() {
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={getOnboardingLink}>
             <LinkIcon className="h-4 w-4" />
-            Onboarding link
+            New onboarding link
           </Button>
           <Button variant="outline" onClick={() => setInviteOpen(true)}>
             <UserPlus className="h-4 w-4" />
@@ -265,6 +276,14 @@ export default function EmployeesPage() {
               <Copy className="h-4 w-4" />
             </Button>
           </div>
+          {linkDialog?.revocable && (
+            <div className="flex items-center justify-between gap-3 border-t pt-3 text-xs text-muted-foreground">
+              Link shared somewhere it shouldn&apos;t be?
+              <Button type="button" variant="outline" size="sm" onClick={revokeOnboardingLink}>
+                Disable link
+              </Button>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

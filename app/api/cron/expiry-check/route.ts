@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import crypto from "crypto"
 import { connectDB } from "@/lib/db"
 import { Asset } from "@/models/Asset"
 import { License } from "@/models/License"
@@ -21,9 +22,15 @@ const WARRANTY_AMC_REMINDER_DAYS = 30
 function isAuthorized(req: Request) {
   const secret = process.env.CRON_SECRET
   if (!secret) return false
-  const url = new URL(req.url)
-  const provided = req.headers.get("x-cron-secret") ?? url.searchParams.get("secret")
-  return provided === secret
+  // Header only — a ?secret= query param ends up in access logs, proxy
+  // logs and browser history. "Authorization: Bearer" is what Vercel Cron
+  // sends; x-cron-secret suits any other scheduler.
+  const bearer = req.headers.get("authorization")?.match(/^Bearers+(.+)$/i)?.[1]
+  const provided = req.headers.get("x-cron-secret") ?? bearer
+  if (!provided) return false
+  const a = crypto.createHash("sha256").update(provided).digest()
+  const b = crypto.createHash("sha256").update(secret).digest()
+  return crypto.timingSafeEqual(a, b)
 }
 
 async function notifyItPeople(opts: {

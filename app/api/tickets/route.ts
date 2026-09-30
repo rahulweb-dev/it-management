@@ -10,6 +10,7 @@ import { ticketCreateSchema } from "@/lib/validations/ticket"
 import { computeSlaDeadline } from "@/lib/sla"
 import { sendMail } from "@/lib/mail"
 import { writeAuditLog } from "@/lib/audit"
+import { assertAssetInScope } from "@/lib/tenant-refs"
 
 export async function GET(req: Request) {
   const { session, response } = await requireSession()
@@ -50,6 +51,12 @@ export async function POST(req: Request) {
     }
     const { issueType, priority, description, relatedAssetId } = parsed.data
     const companyId = session.user.companyId!
+    await connectDB()
+    await assertAssetInScope(
+      companyId,
+      relatedAssetId,
+      session.user.role === "employee" ? session.user.id : undefined
+    )
 
     await connectDB()
     const seq = await nextSequence(companyId, "ticket")

@@ -5,6 +5,7 @@ import { requireSession, handleApiError } from "@/lib/api"
 import { assertCompanyRole } from "@/lib/rbac"
 import { branchSchema } from "@/lib/validations/branch"
 import { writeAuditLog } from "@/lib/audit"
+import { assertUserInCompany } from "@/lib/tenant-refs"
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { session, response } = await requireSession()
@@ -20,9 +21,13 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     }
 
     await connectDB()
+    await assertUserInCompany(session.user.companyId!, parsed.data.managerId, "Manager")
+    const { managerId, ...changes } = parsed.data
     const branch = await Branch.findOneAndUpdate(
       { _id: id, companyId: session.user.companyId },
-      { ...parsed.data, managerId: parsed.data.managerId || null },
+      // Only touch the manager when the request actually sends one — a
+      // partial update (e.g. just the name) must not clear it.
+      { ...changes, ...(managerId !== undefined && { managerId: managerId || null }) },
       { new: true }
     )
     if (!branch) return NextResponse.json({ error: "Branch not found" }, { status: 404 })

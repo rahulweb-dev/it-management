@@ -31,6 +31,7 @@ export async function POST(req: Request) {
     }
 
     account.passwordHash = await bcrypt.hash(newPassword, 12)
+    account.passwordChangedAt = new Date()
     await account.save()
 
     return NextResponse.json({ ok: true })

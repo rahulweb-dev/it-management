@@ -5,7 +5,7 @@ import { requireSession, handleApiError } from "@/lib/api"
 import { assertCompanyRole } from "@/lib/rbac"
 import { getAccessibleCompanyIds } from "@/lib/organization"
 import { addPhotoSchema, removePhotoSchema } from "@/lib/validations/asset-photo"
-import { uploadBuffer, isImageKitConfigured } from "@/lib/imagekit"
+import { uploadBuffer, isImageKitConfigured, deleteFileByUrl } from "@/lib/imagekit"
 import { StorageLimitError } from "@/lib/storage"
 import { writeAuditLog } from "@/lib/audit"
 
@@ -108,8 +108,24 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
     if (!asset) return NextResponse.json({ error: "Asset not found" }, { status: 404 })
     const companyId = asset.companyId.toString()
 
+    if (!asset.photos.includes(parsed.data.url)) {
+      return NextResponse.json({ error: "Photo not found" }, { status: 404 })
+    }
     asset.photos = asset.photos.filter((p: string) => p !== parsed.data.url)
     await asset.save()
+
+    // Best-effort: the photo is already off the asset; if the storage
+    // delete fails, log it rather than failing the request.
+    let freedBytes = 0
+    try {
+      freedBytes = await deleteFileByUrl({
+        url: parsed.data.url,
+        companyId,
+        allowedFolders: [`/asset-photos/${companyId}/`],
+      })
+    } catch (err) {
+      console.error("Failed to delete photo from storage", parsed.data.url, err)
+    }
 
     writeAuditLog({
       companyId,
@@ -117,6 +133,7 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
       action: "asset.photo_removed",
       entityType: "Asset",
       entityId: asset._id.toString(),
+      changes: { freedBytes },
       request: req,
     })
 

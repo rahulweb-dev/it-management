@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { toast } from "sonner"
@@ -32,15 +32,21 @@ import {
   FormMessage,
 } from "@/components/ui/form"
 
+const NONE = "__none"
+const NEW = "__new"
+
 export function CompanyFormDialog({
   open,
   onOpenChange,
   onSaved,
+  organizations,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   onSaved: () => void
+  organizations: { _id: string; name: string }[]
 }) {
+  const [orgChoice, setOrgChoice] = useState(NONE)
   const form = useForm<CreateCompanyInput>({
     resolver: zodResolver(createCompanySchema),
     defaultValues: {
@@ -49,12 +55,16 @@ export function CompanyFormDialog({
       itPersonEmail: "",
       itPersonPassword: "",
       plan: "starter",
+      organizationId: "",
       organizationName: "",
     },
   })
 
   useEffect(() => {
-    if (open) form.reset()
+    if (open) {
+      form.reset()
+      setOrgChoice(NONE)
+    }
   }, [open, form])
 
   async function onSubmit(values: CreateCompanyInput) {
@@ -139,23 +149,49 @@ export function CompanyFormDialog({
                 </FormItem>
               )}
             />
-            <FormField
-              control={form.control}
-              name="organizationName"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Organization (optional)</FormLabel>
-                  <FormControl>
-                    <Input placeholder="e.g. Acme Group" {...field} />
-                  </FormControl>
-                  <p className="text-xs text-muted-foreground">
-                    Give two or more companies the same organization name to let one IT Person
-                    manage all of them — reusing an existing name adds this company to that group.
-                  </p>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+            <FormItem>
+              <FormLabel>Organization</FormLabel>
+              <Select
+                value={orgChoice}
+                onValueChange={(v) => {
+                  setOrgChoice(v)
+                  form.setValue("organizationId", v === NONE || v === NEW ? "" : v)
+                  if (v !== NEW) form.setValue("organizationName", "")
+                }}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NONE}>Standalone company</SelectItem>
+                  {organizations.map((o) => (
+                    <SelectItem key={o._id} value={o._id}>
+                      Join {o.name}
+                    </SelectItem>
+                  ))}
+                  <SelectItem value={NEW}>New organization…</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Companies in the same organization can be managed by one IT Person, who can then see
+                all of their data — only join a group this customer actually belongs to.
+              </p>
+            </FormItem>
+            {orgChoice === NEW && (
+              <FormField
+                control={form.control}
+                name="organizationName"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>New organization name</FormLabel>
+                    <FormControl>
+                      <Input placeholder="e.g. Acme Group" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            )}
             <FormField
               control={form.control}
               name="plan"

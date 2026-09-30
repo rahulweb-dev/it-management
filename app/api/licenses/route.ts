@@ -7,6 +7,7 @@ import { licenseCreateSchema } from "@/lib/validations/license"
 import { licenseStatus } from "@/lib/license-status"
 import { escapeRegex } from "@/lib/utils"
 import { writeAuditLog } from "@/lib/audit"
+import { assertUserInCompany } from "@/lib/tenant-refs"
 
 export async function GET(req: Request) {
   const { session, response } = await requireSession()
@@ -60,6 +61,8 @@ export async function POST(req: Request) {
     }
     const { seats, cost, reminderDaysBefore, assignedTo, ...rest } = parsed.data
     const companyId = session.user.companyId!
+    await connectDB()
+    await assertUserInCompany(companyId, assignedTo, "Assignee")
 
     if (new Date(parsed.data.expiryDate) <= new Date(parsed.data.startDate)) {
       return NextResponse.json(

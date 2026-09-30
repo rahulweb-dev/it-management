@@ -4,6 +4,7 @@ import Link from "next/link"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { toast } from "sonner"
+import { signOut } from "next-auth/react"
 import { ArrowLeft } from "lucide-react"
 import { changePasswordSchema, type ChangePasswordInput } from "@/lib/validations/profile"
 import { Button } from "@/components/ui/button"
@@ -47,8 +48,11 @@ export function ProfileForm({
       return
     }
 
-    toast.success("Password updated")
+    // Changing the password ends every session, this one included (see
+    // auth.ts), so sign out cleanly instead of failing on the next request.
+    toast.success("Password updated — please sign in with your new password")
     form.reset()
+    await signOut({ callbackUrl: "/login" })
   }
 
   return (

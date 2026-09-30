@@ -34,9 +34,21 @@ export function checkRateLimit(key: string, limit: number, windowMs: number) {
   return { allowed: true, remaining: limit - bucket.count }
 }
 
-/** Best-effort client IP from common proxy headers; falls back to a shared bucket in dev. */
+/**
+ * Client IP for rate limiting. Each proxy *appends* the address it saw to
+ * X-Forwarded-For, so anything to the left of our own proxies' entries was
+ * written by the client and can be spoofed — taking the first entry let an
+ * attacker get a fresh rate-limit bucket per request. Instead count
+ * TRUSTED_PROXY_HOPS entries from the right (default 1: one load balancer
+ * or platform edge in front of the app). Hosts that overwrite the header
+ * with a single value (e.g. Vercel) work with the default too.
+ */
 export function getClientIp(request: Request) {
-  const forwardedFor = request.headers.get("x-forwarded-for")
-  if (forwardedFor) return forwardedFor.split(",")[0].trim()
+  const hops = Math.max(1, Number(process.env.TRUSTED_PROXY_HOPS) || 1)
+  const entries = (request.headers.get("x-forwarded-for") ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+  if (entries.length > 0) return entries[Math.max(0, entries.length - hops)]
   return request.headers.get("x-real-ip") ?? "unknown"
 }

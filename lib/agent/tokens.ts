@@ -2,6 +2,9 @@ import crypto from "crypto"
 
 const ENROLLMENT_TTL_MS = 48 * 60 * 60 * 1000 // 48 hours
 
+/** Exact shape of a raw enrollment token (24 random bytes, hex). */
+export const ENROLLMENT_TOKEN_PATTERN = /^[a-f0-9]{48}$/
+
 export function createEnrollmentToken() {
   const rawToken = crypto.randomBytes(24).toString("hex")
   const tokenHash = hashToken(rawToken)

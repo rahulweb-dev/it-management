@@ -34,6 +34,7 @@ export async function POST(req: Request) {
   }
 
   user.passwordHash = await bcrypt.hash(password, 12)
+  user.passwordChangedAt = new Date()
   user.resetTokenHash = null
   user.resetTokenExpiresAt = null
   await user.save()

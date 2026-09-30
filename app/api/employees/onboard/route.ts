@@ -10,6 +10,9 @@ import { hashInviteToken } from "@/lib/employee-invite"
 import { createEnrollmentToken } from "@/lib/agent/tokens"
 import { checkRateLimit, getClientIp } from "@/lib/rate-limit"
 import { writeAuditLog } from "@/lib/audit"
+import mongoose from "mongoose"
+import { HttpError } from "@/lib/api"
+import { assertCanAddEmployees } from "@/lib/plan-limits"
 
 export async function POST(req: Request) {
   const ip = getClientIp(req)
@@ -64,7 +67,14 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "That Employee ID is already in use" }, { status: 409 })
   }
 
-  const branch = await Branch.findOne({ _id: branchId, companyId })
+  try {
+    await assertCanAddEmployees(companyId)
+  } catch (err) {
+    if (err instanceof HttpError) return NextResponse.json({ error: err.message }, { status: err.status })
+    throw err
+  }
+
+  const branch = mongoose.isValidObjectId(branchId) ? await Branch.findOne({ _id: branchId, companyId }) : null
   if (!branch) {
     return NextResponse.json({ error: "Select a valid branch" }, { status: 400 })
   }

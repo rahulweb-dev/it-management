@@ -1,4 +1,5 @@
 import { AuditLog } from "@/models/AuditLog"
+import { getClientIp } from "@/lib/rate-limit"
 
 /**
  * Records who changed what, when — the kind of thing enterprise security
@@ -16,11 +17,7 @@ export async function writeAuditLog(entry: {
   request?: Request
 }) {
   try {
-    const ipAddress = entry.request
-      ? entry.request.headers.get("x-forwarded-for")?.split(",")[0].trim() ??
-        entry.request.headers.get("x-real-ip") ??
-        null
-      : null
+    const ipAddress = entry.request ? getClientIp(entry.request) : null
 
     await AuditLog.create({
       companyId: entry.companyId,

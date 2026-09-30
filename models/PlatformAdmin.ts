@@ -12,6 +12,8 @@ const PlatformAdminSchema = new Schema(
     name: { type: String, required: true, trim: true },
     email: { type: String, required: true, unique: true, lowercase: true, trim: true },
     passwordHash: { type: String, required: true },
+    // Sessions issued before this are rejected on their next re-check (auth.ts).
+    passwordChangedAt: { type: Date, default: null },
     isActive: { type: Boolean, default: true },
     lastLogin: { type: Date, default: null },
   },

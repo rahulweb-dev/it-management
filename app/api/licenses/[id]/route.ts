@@ -5,6 +5,7 @@ import { requireSession, handleApiError } from "@/lib/api"
 import { assertCompanyRole } from "@/lib/rbac"
 import { licenseUpdateSchema } from "@/lib/validations/license"
 import { writeAuditLog } from "@/lib/audit"
+import { assertUserInCompany } from "@/lib/tenant-refs"
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { session, response } = await requireSession()
@@ -20,6 +21,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     }
     const { seats, cost, reminderDaysBefore, assignedTo, ...rest } = parsed.data
     const companyId = session.user.companyId!
+    await connectDB()
+    await assertUserInCompany(companyId, assignedTo, "Assignee")
 
     await connectDB()
     const license = await License.findOne({ _id: id, companyId })

@@ -1,30 +1,22 @@
 /**
  * Generates the installer scripts employees run on their own machine.
- * Each script is self-contained and does double duty: first run enrolls
- * the device (using the one-time token) and installs itself as a
- * recurring scheduled job; every run after that just checks in using the
- * saved device key. No compiled binary, no runtime to install — just the
- * OS's own scripting engine (PowerShell on Windows, bash on Mac).
+ * Each installer is self-contained: first run enrolls the device (using
+ * the one-time token) and installs a recurring check-in job; every run
+ * after that just checks in using the saved device key. No compiled
+ * binary, no runtime to install — just the OS's own scripting engine
+ * (PowerShell on Windows, bash on Mac).
  *
  * These are written against standard, documented OS commands but were
  * authored without the ability to run them on real Windows/Mac hardware
  * — test on one machine of each OS before rolling out broadly.
+ *
+ * `token` is only ever interpolated after the installer route has checked
+ * it against ENROLLMENT_TOKEN_PATTERN (hex only) — never pass anything
+ * unvalidated in here, it lands inside shell source.
  */
 
-export function windowsInstallerScript(opts: { apiBase: string; token: string }) {
-  return `# AssetFlow Agent — Windows
-# Collects basic hardware/system info and registers this machine in AssetFlow.
-# Re-run safe: first run enrolls, every run after that just checks in.
-$ErrorActionPreference = "Stop"
-$ApiBase = "${opts.apiBase}"
-$Token = "${opts.token}"
-$InstallDir = "$env:ProgramData\\AssetFlowAgent"
-$ConfigPath = "$InstallDir\\config.json"
-$ScriptPath = "$InstallDir\\agent.ps1"
-
-New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
-
-function Get-HardwareInfo {
+// Shared by the Windows installer and the installed check-in job.
+const WINDOWS_HARDWARE_FN = `function Get-HardwareInfo {
     $cs = Get-CimInstance Win32_ComputerSystem
     $bios = Get-CimInstance Win32_BIOS
     $os = Get-CimInstance Win32_OperatingSystem
@@ -53,6 +45,66 @@ function Get-HardwareInfo {
         macAddress   = $netAdapter.MacAddress
         loggedInUser = $env:USERNAME
     }
+}`
+
+/**
+ * The recurring job the scheduled task runs: check-in only, with no
+ * enrollment token inside (it's single-use and already spent by then).
+ * The installer writes this to disk — the installer itself runs from
+ * memory via the .bat launcher, so it has no file of its own to copy
+ * ($PSCommandPath is empty), which is what used to break scheduling.
+ */
+function windowsAgentScript(apiBase: string) {
+  return `# AssetFlow Agent - Windows (installed check-in job)
+$ErrorActionPreference = "Stop"
+$ApiBase = "${apiBase}"
+$ConfigPath = "$env:ProgramData\\AssetFlowAgent\\config.json"
+
+${WINDOWS_HARDWARE_FN}
+
+$config = Get-Content $ConfigPath -Raw | ConvertFrom-Json
+$headers = @{ Authorization = "Bearer $($config.deviceApiKey)" }
+$body = @{ hardware = (Get-HardwareInfo) } | ConvertTo-Json -Depth 5
+Invoke-RestMethod -Uri "$ApiBase/api/agent/checkin" -Method Post -Body $body -ContentType "application/json" -Headers $headers | Out-Null`
+}
+
+export function windowsInstallerScript(opts: { apiBase: string; token: string }) {
+  return `# AssetFlow Agent — Windows
+# Collects basic hardware/system info and registers this machine in AssetFlow.
+# Re-run safe: first run enrolls, every run after that just checks in.
+$ErrorActionPreference = "Stop"
+$ApiBase = "${opts.apiBase}"
+$Token = "${opts.token}"
+$InstallDir = "$env:ProgramData\\AssetFlowAgent"
+$ConfigPath = "$InstallDir\\config.json"
+$ScriptPath = "$InstallDir\\agent.ps1"
+
+New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+
+${WINDOWS_HARDWARE_FN}
+
+# Writes the check-in job to disk and schedules it every 20 minutes. Also
+# run on re-install when either is missing: machines enrolled by an older
+# installer never got their scheduled task.
+function Install-Agent {
+    # Single-quoted here-string: written to disk verbatim, nothing expanded.
+    $agentScript = @'
+${windowsAgentScript(opts.apiBase)}
+'@
+    Set-Content -Path $ScriptPath -Value $agentScript -Encoding UTF8
+
+    try {
+        $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File \`"$ScriptPath\`""
+        # Finite 10-year window: [TimeSpan]::MaxValue is rejected by newer
+        # Windows builds. No -RunLevel Highest, which needs admin rights most
+        # employees don't have — the task runs as the installing user.
+        $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 20) -RepetitionDuration (New-TimeSpan -Days 3650)
+        Register-ScheduledTask -TaskName "AssetFlowAgent" -Action $action -Trigger $trigger -Force | Out-Null
+        Write-Host "AssetFlow: automatic check-ins scheduled every 20 minutes."
+    } catch {
+        Write-Host "AssetFlow: couldn't schedule automatic check-ins: $_"
+        Write-Host "AssetFlow: ask your IT team to schedule $ScriptPath to run every 20 minutes."
+    }
 }
 
 $hardware = Get-HardwareInfo
@@ -62,13 +114,16 @@ if (Test-Path $ConfigPath) {
     Write-Host "AssetFlow: existing registration found (asset $($config.assetId)) — checking in, not enrolling as new."
     Write-Host "AssetFlow: to force a fresh enrollment instead, delete $ConfigPath first."
     $body = @{ hardware = $hardware } | ConvertTo-Json -Depth 5
+    $headers = @{ Authorization = "Bearer $($config.deviceApiKey)" }
     try {
-        Invoke-RestMethod -Uri "$ApiBase/api/agent/checkin" -Method Post -Body $body -ContentType "application/json" \`
-            -Headers @{ Authorization = "Bearer $($config.deviceApiKey)" } | Out-Null
+        Invoke-RestMethod -Uri "$ApiBase/api/agent/checkin" -Method Post -Body $body -ContentType "application/json" -Headers $headers | Out-Null
         Write-Host "AssetFlow: check-in OK ($($config.assetId))"
     } catch {
         Write-Host "AssetFlow: check-in failed: $_"
         exit 1
+    }
+    if (-not (Test-Path $ScriptPath) -or -not (Get-ScheduledTask -TaskName "AssetFlowAgent" -ErrorAction SilentlyContinue)) {
+        Install-Agent
     }
 } else {
     Write-Host "AssetFlow: no existing registration on this machine — enrolling as a new device."
@@ -81,11 +136,7 @@ if (Test-Path $ConfigPath) {
     }
     @{ deviceApiKey = $response.deviceApiKey; assetId = $response.assetId } | ConvertTo-Json | Set-Content $ConfigPath
 
-    Copy-Item -Path $PSCommandPath -Destination $ScriptPath -Force
-
-    $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File \`"$ScriptPath\`""
-    $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 20) -RepetitionDuration ([TimeSpan]::MaxValue)
-    Register-ScheduledTask -TaskName "AssetFlowAgent" -Action $action -Trigger $trigger -RunLevel Highest -Force | Out-Null
+    Install-Agent
 
     Write-Host "AssetFlow: enrolled successfully as $($response.assetId)"
 }
@@ -142,6 +193,10 @@ PLIST_PATH="$HOME/Library/LaunchAgents/com.assetflow.agent.plist"
 
 mkdir -p "$INSTALL_DIR"
 
+# JSON-escape a value: a quote or backslash in e.g. the computer name
+# used to produce invalid JSON and break enrollment/check-in.
+json_escape() { printf '%s' "$1" | sed -e 's/\\\\/\\\\\\\\/g' -e 's/"/\\\\"/g' | tr -d '\\n\\r'; }
+
 HOSTNAME=$(scutil --get ComputerName 2>/dev/null || hostname)
 MODEL=$(sysctl -n hw.model)
 CPU=$(sysctl -n machdep.cpu.brand_string)
@@ -154,21 +209,23 @@ IP=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null ||
 MAC=$(ifconfig en0 2>/dev/null | awk '/ether/{print $2}')
 LOGGED_IN_USER=$(stat -f "%Su" /dev/console)
 STORAGE_GB=$(( $(df -k / | tail -1 | awk '{print $2}') / 1048576 ))
+# MacBook* models are laptops; iMac, Mac mini, Mac Studio, Mac Pro are not.
+case "$MODEL" in MacBook*) DEVICE_TYPE="laptop" ;; *) DEVICE_TYPE="desktop" ;; esac
 
 HARDWARE_JSON=$(cat <<EOF
 {
-  "hostname": "$HOSTNAME",
-  "deviceType": "laptop",
+  "hostname": "$(json_escape "$HOSTNAME")",
+  "deviceType": "$DEVICE_TYPE",
   "manufacturer": "Apple",
-  "model": "$MODEL",
-  "cpu": "$CPU",
-  "ramGb": $RAM_GB,
-  "storageGb": $STORAGE_GB,
-  "os": "$OS_NAME $OS_VERSION",
-  "serialNumber": "$SERIAL",
-  "ipAddress": "$IP",
-  "macAddress": "$MAC",
-  "loggedInUser": "$LOGGED_IN_USER"
+  "model": "$(json_escape "$MODEL")",
+  "cpu": "$(json_escape "$CPU")",
+  "ramGb": \${RAM_GB:-0},
+  "storageGb": \${STORAGE_GB:-0},
+  "os": "$(json_escape "$OS_NAME $OS_VERSION")",
+  "serialNumber": "$(json_escape "$SERIAL")",
+  "ipAddress": "$(json_escape "$IP")",
+  "macAddress": "$(json_escape "$MAC")",
+  "loggedInUser": "$(json_escape "$LOGGED_IN_USER")"
 }
 EOF
 )

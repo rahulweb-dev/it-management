@@ -9,6 +9,8 @@ import { assertCompanyInOrganization } from "@/lib/organization"
 import { sendMail } from "@/lib/mail"
 import { employeeCreateSchema } from "@/lib/validations/employee"
 import { writeAuditLog } from "@/lib/audit"
+import { assertBranchInCompany, assertUserInCompany } from "@/lib/tenant-refs"
+import { assertCanAddEmployees } from "@/lib/plan-limits"
 
 export async function GET(req: Request) {
   const { session, response } = await requireSession()
@@ -33,7 +35,7 @@ export async function GET(req: Request) {
     if (branchId) filter.branchId = branchId
 
     const employees = await User.find(filter)
-      .select("-passwordHash")
+      .select("-passwordHash -resetTokenHash -resetTokenExpiresAt")
       .populate("branchId", "name")
       .sort({ name: 1 })
 
@@ -62,8 +64,12 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "An account with this email already exists" }, { status: 409 })
     }
 
-    const passwordHash = await bcrypt.hash(password, 12)
     const companyId = session.user.companyId!
+    await assertBranchInCompany(companyId, rest.branchId)
+    await assertUserInCompany(companyId, rest.managerId, "Manager")
+    await assertCanAddEmployees(companyId)
+
+    const passwordHash = await bcrypt.hash(password, 12)
     const seq = await nextSequence(companyId, "employee")
     const employee = await User.create({
       ...rest,

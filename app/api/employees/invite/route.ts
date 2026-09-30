@@ -9,6 +9,7 @@ import { employeeInviteSchema } from "@/lib/validations/employee"
 import { createInviteToken } from "@/lib/employee-invite"
 import { sendMail } from "@/lib/mail"
 import { writeAuditLog } from "@/lib/audit"
+import { assertCanAddEmployees } from "@/lib/plan-limits"
 
 export async function POST(req: Request) {
   const { session, response } = await requireSession()
@@ -29,6 +30,8 @@ export async function POST(req: Request) {
     if (existing) {
       return NextResponse.json({ error: "An account with this email already exists" }, { status: 409 })
     }
+
+    await assertCanAddEmployees(companyId)
 
     const { rawToken, tokenHash, expiresAt } = createInviteToken()
     const invite = await EmployeeInviteToken.create({

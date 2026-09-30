@@ -6,6 +6,7 @@ import { assertCompanyRole } from "@/lib/rbac"
 import { assertCompanyInOrganization } from "@/lib/organization"
 import { branchSchema } from "@/lib/validations/branch"
 import { writeAuditLog } from "@/lib/audit"
+import { assertUserInCompany } from "@/lib/tenant-refs"
 
 export async function GET(req: Request) {
   const { session, response } = await requireSession()
@@ -52,6 +53,7 @@ export async function POST(req: Request) {
     }
 
     await connectDB()
+    await assertUserInCompany(session.user.companyId!, parsed.data.managerId, "Manager")
     const branch = await Branch.create({
       ...parsed.data,
       managerId: parsed.data.managerId || null,

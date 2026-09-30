@@ -35,6 +35,10 @@ type CompanyRow = {
   subscriptionStatus: string
   createdAt: string
   userCount: number
+  activeUserCount: number
+  assetCount: number
+  maxAssets: number
+  maxEmployees: number
   itPerson: { name: string; email: string } | null
   storage: { usedGb: number; limitGb: number; percentUsed: number }
   organizationId: { _id: string; name: string } | null
@@ -68,6 +72,22 @@ export default function PlatformPage() {
       return
     }
     toast.success(next === "canceled" ? "Company deactivated" : "Company activated")
+    load()
+  }
+
+  async function changeLimit(company: CompanyRow, field: "maxAssets" | "maxEmployees", raw: string) {
+    const value = Number(raw)
+    if (!Number.isInteger(value) || value < 1 || value === company[field]) return
+    const res = await fetch(`/api/platform/companies/${company._id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ [field]: value }),
+    })
+    if (!res.ok) {
+      toast.error("Failed to update limit")
+      return
+    }
+    toast.success(`${field === "maxAssets" ? "Asset" : "User"} limit set to ${value}`)
     load()
   }
 
@@ -122,7 +142,7 @@ export default function PlatformPage() {
                 <TableHead>Plan</TableHead>
                 <TableHead>Storage</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead>Users</TableHead>
+                <TableHead>Limits (used / max)</TableHead>
                 <TableHead className="w-24">Active</TableHead>
               </TableRow>
             </TableHeader>
@@ -171,7 +191,29 @@ export default function PlatformPage() {
                   <TableCell>
                     <StatusBadge status={company.subscriptionStatus} />
                   </TableCell>
-                  <TableCell>{company.userCount}</TableCell>
+                  <TableCell>
+                    <div className="space-y-1 text-xs">
+                      {([
+                        ["Users", company.activeUserCount, "maxEmployees"],
+                        ["Assets", company.assetCount, "maxAssets"],
+                      ] as const).map(([label, used, field]) => (
+                        <label key={field} className="flex items-center gap-1.5">
+                          <span className="w-11 text-muted-foreground">{label}</span>
+                          <span className={used >= company[field] ? "font-medium text-status-danger" : ""}>{used}</span>/
+                          <input
+                            key={company[field]}
+                            type="number"
+                            min={1}
+                            defaultValue={company[field]}
+                            aria-label={`${label} limit for ${company.name}`}
+                            onBlur={(e) => changeLimit(company, field, e.target.value)}
+                            onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+                            className="h-6 w-16 rounded border bg-transparent px-1 tabular-nums"
+                          />
+                        </label>
+                      ))}
+                    </div>
+                  </TableCell>
                   <TableCell>
                     <Switch
                       checked={company.subscriptionStatus !== "canceled"}
@@ -185,7 +227,16 @@ export default function PlatformPage() {
         </div>
       )}
 
-      <CompanyFormDialog open={dialogOpen} onOpenChange={setDialogOpen} onSaved={load} />
+      <CompanyFormDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        onSaved={load}
+        organizations={[
+          ...new Map(
+            (companies ?? []).flatMap((c) => (c.organizationId ? [[c.organizationId._id, c.organizationId]] : []))
+          ).values(),
+        ]}
+      />
     </div>
   )
 }
